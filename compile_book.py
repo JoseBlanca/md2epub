@@ -70,13 +70,14 @@ def _footnote_processor(footnote, footnote_chapter_fpath):
 
 
 def _footnote_definition_processor(footnote_definition,
-                                   chapter_fpath, lang):
+                                   chapter_path, lang):
     footnote_id = footnote_definition['match'].group('id')
 
     _FOOTNOTE_DEFINITION_ID_COUNTS[footnote_id] += 1
     if _FOOTNOTE_DEFINITION_ID_COUNTS[footnote_id] > 1:
         raise RuntimeError('More than one footnote definition for footnote ID: ' + footnote_id)
 
+    chapter_fpath = str(chapter_path)
     back_href_to_footnote = f'{chapter_fpath}#ft_{footnote_id}'
     li_id = f'ftd_{footnote_id}'
     content = footnote_definition['match'].group('content').strip()
@@ -88,7 +89,7 @@ def _footnote_definition_processor(footnote_definition,
 
 
 def _citation_processor(citation, bibliography_chapter_fpath,
-                        chapter_fpath,
+                        chapter_path,
                         footnote_chapter_fpath,
                         bibliography_db,
                         bibliography_entries_seen,
@@ -107,6 +108,7 @@ def _citation_processor(citation, bibliography_chapter_fpath,
     footnote_definition_content = create_citation_note(bibliography_db,
                                                        citation_id)
     li_id = f'ftd_{footnote_id}'
+    chapter_fpath = str(chapter_path)
     back_href_to_footnote = f'{chapter_fpath}#ft_{footnote_id}'
     footnote_definition_text = f'<li id= "{li_id}" role="doc-endnote"><p>{footnote_definition_content}</p><p><a href="{back_href_to_footnote}" role="doc-backlink">{BACK_ENDNOTE_TEXT[lang]}</a>.</p></li>'
 
@@ -168,7 +170,7 @@ def _get_citation_location_in_text(footnote_definition, footnote_locations):
         return footnote_locations[footnote_definition['footnote_id']]
 
 
-def _process_citations_and_footnotes(md_text, chapter_fpath,
+def _process_citations_and_footnotes(md_text, chapter_path,
                                      footnote_chapter_fpath,
                                      bibliography_chapter_fpath,
                                      bibliography_db, lang):
@@ -181,10 +183,10 @@ def _process_citations_and_footnotes(md_text, chapter_fpath,
     item_processors = {'footnote': partial(_footnote_processor,
                                            footnote_chapter_fpath=footnote_chapter_fpath),
                        'footnote_definition': partial(_footnote_definition_processor,
-                                                      chapter_fpath=chapter_fpath,
+                                                      chapter_path=chapter_path,
                                                       lang=lang),
                        'citation': partial(_citation_processor,
-                                           chapter_fpath=chapter_fpath,
+                                           chapter_path=chapter_path,
                                            footnote_chapter_fpath=footnote_chapter_fpath,
                                            bibliography_chapter_fpath=bibliography_chapter_fpath,
                                            bibliography_db=bibliography_db,
@@ -244,14 +246,14 @@ def _process_basic_markdown(md_text):
     return xhtml_text
 
 
-def _process_md_text(lines_iterator, chapter_fpath,
+def _process_md_text(lines_iterator, chapter_path,
                      footnote_chapter_fpath,
                      bibliography_chapter_fpath,
                      bibliography_db, lang):
     md_text = '\n'.join(lines_iterator)
 
     result = _process_citations_and_footnotes(md_text=md_text,
-                                              chapter_fpath=chapter_fpath,
+                                              chapter_path=chapter_path,
                                               footnote_chapter_fpath=footnote_chapter_fpath,
                                               bibliography_chapter_fpath=bibliography_chapter_fpath,
                                               bibliography_db=bibliography_db,
@@ -302,7 +304,7 @@ def _get_lines_in_files(md_files):
             yield line
 
 
-def render_section(section, base_header_level, chapter_fpath,
+def render_section(section, base_header_level, path,
                    footnote_chapter_fpath,
                    bibliography_chapter_fpath,
                    bibliography_db,
@@ -331,7 +333,7 @@ def render_section(section, base_header_level, chapter_fpath,
             id_ = res.get('id')
         elif fragment['kind'] == 'fragment':
             result = _process_md_text(fragment['lines'],
-                                      chapter_fpath=chapter_fpath,
+                                      chapter_path=path,
                                       footnote_chapter_fpath=footnote_chapter_fpath,
                                       bibliography_chapter_fpath=bibliography_chapter_fpath,
                                       bibliography_db=bibliography_db,
@@ -353,7 +355,7 @@ def render_section(section, base_header_level, chapter_fpath,
     return result
 
 
-def render_chapter(sections, idx, chapter_fpath, base_header_level,
+def render_chapter(sections, idx, path, base_header_level,
                    footnote_chapter_fpath, bibliography_chapter_fpath,
                    bibliography_db, lang):
 
@@ -367,7 +369,7 @@ def render_chapter(sections, idx, chapter_fpath, base_header_level,
 
     result = render_section(first_section,
                             base_header_level,
-                            chapter_fpath=chapter_fpath,
+                            path=path,
                             footnote_chapter_fpath=footnote_chapter_fpath,
                             bibliography_chapter_fpath=bibliography_chapter_fpath,
                             bibliography_db=bibliography_db,
@@ -391,7 +393,7 @@ def render_chapter(sections, idx, chapter_fpath, base_header_level,
 
         result = render_section(subchapter_section,
                                 base_header_level + 1,
-                                chapter_fpath=chapter_fpath,
+                                path=path,
                                 footnote_chapter_fpath=footnote_chapter_fpath,
                                 bibliography_chapter_fpath=bibliography_chapter_fpath,
                                 bibliography_db=bibliography_db,
@@ -495,13 +497,27 @@ def _get_dir_kind(dir_path):
         raise ValueError(msg)
 
 
-def _get_parts_and_chapters(book_base_dir):
+def _create_chapter_path(idx, out_dir):
+    fname = f'chapter_{idx}.{HTML_FILES_EXTENSION}'
+    path = out_dir / HTML_DIR / fname
+    return path
+
+
+def _create_part_path(idx, out_dir):
+    fname = f'part_{idx}.{HTML_FILES_EXTENSION}'
+    path = out_dir / HTML_DIR / fname
+    return path
+
+
+def _get_parts_and_chapters(book_base_dir, out_dir):
     chapters = []
     parts = []
     for dir_ in sorted(book_base_dir.iterdir(), key=lambda path: path.name):
         if dir_.name.startswith('.'):
             continue
+
         dir_kind = _get_dir_kind(dir_)
+
         if dir_kind == 'part':
             part_chapters = _get_chapters(dir_)
             chapters.extend(part_chapters)
@@ -595,6 +611,25 @@ def _get_parts_and_chapters(book_base_dir):
             if 'part' not in section:
                 raise RuntimeError(f'Malformed part section: {section}')
 
+    # add ids
+    part_idx = 0
+    chapter_idx = 0
+    for section in sections:
+        if section['kind'] == 'part':
+            part_idx += 1
+            section['idx'] = part_idx
+            section['path'] = _create_part_path(part_idx, out_dir)
+
+            for chapter in section['chapters']:
+                chapter_idx += 1
+                chapter['idx'] = chapter_idx
+                chapter['path'] = _create_chapter_path(chapter_idx, out_dir)
+
+        if section['kind'] == 'chapter':
+            chapter_idx += 1
+            section['idx'] = chapter_idx
+            section['path'] = _create_chapter_path(chapter_idx, out_dir)
+
     return {'chapters': chapters,
             'parts': parts,
             'parts_and_chapters': sections}
@@ -670,13 +705,14 @@ def _add_toc_chapter(path, chapter_id,
         if toc_level < current_level:
             fhand.write('</ol>\n')
             current_level = toc_level
-        if 'fname' not in toc_entry:
+        if 'path' not in toc_entry:
             if 'title' in toc_entry and toc_entry["title"]:
                 li = f'<li>{toc_entry["title"]}</li>\n'
             else:
                 li = ''
         else:
-            li = f'<li><a href="{toc_entry["fname"]}#{toc_entry["id"]}">{toc_entry["title"]}</a></li>\n'
+            fname = toc_entry['path'].name
+            li = f'<li><a href="{fname}#{toc_entry["id"]}">{toc_entry["title"]}</a></li>\n'
         fhand.write(li)
 
     for _ in range(current_level, 1, -1):
@@ -688,7 +724,7 @@ def _add_toc_chapter(path, chapter_id,
     fhand.write('\n</body>\n</html>\n')
 
 
-def _compile_chapter(chapter, idx, path,
+def _compile_chapter(chapter,
                      base_header_level,
                      endnote_chapter_fname,
                      bibliography_chapter_fpath,
@@ -697,16 +733,18 @@ def _compile_chapter(chapter, idx, path,
         sections = _get_section_files_in_chapter(chapter['chapter']['dir_path'])
     else:
         sections = _get_section_files_in_chapter(chapter['dir_path'])
+
     result = render_chapter(sections,
-                            idx=idx,
-                            chapter_fpath =path.name,
+                            idx=chapter['idx'],
+                            path=chapter['path'],
                             base_header_level=base_header_level,
                             footnote_chapter_fpath=endnote_chapter_fname,
                             bibliography_chapter_fpath=bibliography_chapter_fpath,
                             bibliography_db=bibliography_db,
                             lang=lang)
     chapter_title = result.get('title')
-    fhand = path.open('wt')
+
+    fhand = chapter['path'].open('wt')
     fhand.write(CHAPTER_HEADER_HTML.format(title=chapter_title))
     fhand.write('<body>\n')
     fhand.write(result['rendered_text'])
@@ -715,18 +753,22 @@ def _compile_chapter(chapter, idx, path,
     return {'footnote_definitions': result['footnote_definitions'],
             'bibliography_entries_seen': result['bibliography_entries_seen'],
             'id': result['id'],
-            'title': chapter_title}
+            'title': chapter_title,
+            }
 
 
-def _compile_part(chapter, idx, path,
+def _compile_part(chapter,
                   endnote_chapter_fname, bibliography_chapter_fpath,
                   bibliography_db, lang):
+    idx = chapter['idx']
     id_ = f'part_{idx}'
+
     header = chapter.get('part', {}).get('header', None)
     result = _render_part(part_id=id_,
                           header=header)
     title = result.get('title')
-    fhand = path.open('wt')
+
+    fhand = chapter['path'].open('wt')
     fhand.write(CHAPTER_HEADER_HTML.format(title=title))
     fhand.write('<body>\n')
     fhand.write(result['rendered_text'])
@@ -735,6 +777,7 @@ def _compile_part(chapter, idx, path,
     return {'id': id_,
             'title': title}
 
+
 def compile_book(book_base_dir, out_dir, bibtex_path, lang):
 
     bibliography_db = load_bibliography_db(bibtex_path)
@@ -742,22 +785,18 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
     bibliography_chapter_fpath = f'bibliography.{HTML_FILES_EXTENSION}'
     toc_chapter_fpath = f'toc.{HTML_FILES_EXTENSION}'
 
-    parts_and_chapters = _get_parts_and_chapters(book_base_dir)
+    parts_and_chapters = _get_parts_and_chapters(book_base_dir,
+                                                 out_dir)
 
     footnote_definitions = []
     bibliography_entries_seen = set()
-    chapter_idx = 0
-    part_idx = 0
     toc_info = []
+    parts_are_used = False
 
     for part_or_chapter in parts_and_chapters['parts_and_chapters']:
         if part_or_chapter['kind'] == 'chapter':
-            chapter_idx += 1
-            chapter_fname = f'chapter_{chapter_idx}.{HTML_FILES_EXTENSION}'
-            chapter_path = out_dir / HTML_DIR / chapter_fname
+
             result = _compile_chapter(part_or_chapter,
-                                      idx=chapter_idx,
-                                      path=chapter_path,
                                       base_header_level=1,
                                       endnote_chapter_fname=endnote_chapter_fname,
                                       bibliography_chapter_fpath=bibliography_chapter_fpath,
@@ -767,38 +806,26 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
             bibliography_entries_seen.update(result['bibliography_entries_seen'])
 
             toc_entry = {'id': result['id'],
-                         'path': chapter_path,
+                         'path': part_or_chapter['path'],
                          'title': result['title'],
-                         'fname': chapter_fname,
                          'level': 1}
             toc_info.append(toc_entry)
         elif part_or_chapter['kind'] == 'part':
-            part_idx += 1
-            part_fname = f'part_{part_idx}.{HTML_FILES_EXTENSION}'
-            part_path = out_dir / HTML_DIR / part_fname
-
+            parts_are_used = True
             result = _compile_part(part_or_chapter,
-                                   idx=part_idx,
-                                   path=part_path,
                                    endnote_chapter_fname=endnote_chapter_fname,
                                    bibliography_chapter_fpath=bibliography_chapter_fpath,
                                    bibliography_db=bibliography_db,
                                    lang=lang)
 
             toc_entry = {'id': result['id'],
-                         'path': part_path,
+                         'path': part_or_chapter['path'],
                          'title': result['title'],
-                         'fname': part_fname,
                          'level': 1}
             toc_info.append(toc_entry)
 
             for chapter in part_or_chapter['chapters']:
-                chapter_idx += 1
-                chapter_fname = f'chapter_{chapter_idx}.{HTML_FILES_EXTENSION}'
-                chapter_path = out_dir / HTML_DIR / chapter_fname
                 result = _compile_chapter(chapter,
-                                          idx=chapter_idx,
-                                          path=chapter_path,
                                           base_header_level=2,
                                           endnote_chapter_fname=endnote_chapter_fname,
                                           bibliography_chapter_fpath=bibliography_chapter_fpath,
@@ -808,13 +835,12 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
                 bibliography_entries_seen.update(result['bibliography_entries_seen'])
 
                 toc_entry = {'id': result['id'],
-                             'path': chapter_path,
-                             'fname': chapter_fname,
+                             'path': chapter['path'],
                              'title': result['title'],
                              'level': 2}
                 toc_info.append(toc_entry)
 
-    if (footnote_definitions or bibliography_entries_seen) and part_idx:
+    if (footnote_definitions or bibliography_entries_seen) and parts_are_used:
         part_id = 'part_back_matter'
         part_title = APPENDICES_PART_TITLE[lang]
         toc_entry = {'id': part_id,
@@ -822,13 +848,12 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
                      'level': 1}
         toc_info.append(toc_entry)
 
-    toc_level_for_appendix_chapters = 2 if part_idx else 1
+    toc_level_for_appendix_chapters = 2 if parts_are_used else 1
 
     if footnote_definitions:
-        chapter_idx += 1
         chapter_path = out_dir / HTML_DIR / endnote_chapter_fname
-        chapter_id = f'chapter_{chapter_idx}'
-        base_header_level = 2 if part_idx else 1
+        chapter_id = f'chapter_endnotes'
+        base_header_level = 2 if parts_are_used else 1
         _add_endnotes_chapter(chapter_path,
                               chapter_id=chapter_id,
                               header_level=base_header_level,
@@ -841,10 +866,9 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
                      'level': toc_level_for_appendix_chapters}
         toc_info.append(toc_entry)
     if bibliography_entries_seen:
-        chapter_idx += 1
         chapter_path = out_dir / HTML_DIR / bibliography_chapter_fpath
-        chapter_id = f'chapter_{chapter_idx}'
-        base_header_level = 2 if part_idx else 1
+        chapter_id = f'chapter_bibliography'
+        base_header_level = 2 if parts_are_used else 1
         _add_bibliography_chapter(chapter_path,
                                  chapter_id=chapter_id,
                                  header_level=base_header_level,
