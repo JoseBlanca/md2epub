@@ -318,8 +318,6 @@ def render_section(section, base_header_level, path,
     lines = _get_lines_in_files(md_files)
 
     lowest_header_level_in_md = None
-    title = None
-    id_ = None
     for fragment in _split_section_in_fragments(lines):
         if fragment['kind'] == 'header':
             text = fragment['text']
@@ -329,8 +327,6 @@ def render_section(section, base_header_level, path,
             header_level = (res['level'] - lowest_header_level_in_md) + base_header_level
             header = f'    <h{header_level}>{res["text"]}</h{header_level}>\n'
             rendered_text += header
-            title = res['text']
-            id_ = res.get('id')
         elif fragment['kind'] == 'fragment':
             result = _process_md_text(fragment['lines'],
                                       chapter_path=path,
@@ -348,37 +344,29 @@ def render_section(section, base_header_level, path,
     result = {'rendered_text': rendered_text,
               'footnote_definitions': footnote_definitions,
               'bibliography_entries_seen': bibliography_entries_seen}
-    if title is not None:
-        result['title'] = title
-    if id_ is not None:
-        result['id'] = id_
     return result
 
 
-def render_chapter(sections, idx, path, base_header_level,
+def render_chapter(chapter, base_header_level,
                    footnote_chapter_fpath, bibliography_chapter_fpath,
                    bibliography_db, lang):
 
+    sections = chapter['subsections']
     footnote_definitions = []
     bibliography_entries_seen = set()
 
     first_section = sections[0]
-    if first_section['is_subchapter']:
-        msg = 'The chapter has no file before first subchapter: {}\n'.format(' ,'.join(first_section['md_files']))
-        raise ValueError(msg)
 
     result = render_section(first_section,
                             base_header_level,
-                            path=path,
+                            path=chapter['path'],
                             footnote_chapter_fpath=footnote_chapter_fpath,
                             bibliography_chapter_fpath=bibliography_chapter_fpath,
                             bibliography_db=bibliography_db,
                             lang=lang)
 
-    id_ = result.get('id', f'chapter_{idx}')
-
     rendered_text = CHAPTER_SECTION_LINE.format(epub_type='chapter',
-                                                chapter_id=id_)
+                                                chapter_id=chapter['id'])
 
     rendered_text += result['rendered_text']
     footnote_definitions.extend(result['footnote_definitions'])
@@ -388,12 +376,13 @@ def render_chapter(sections, idx, path, base_header_level,
     subchapter_ids_and_titles = {}
     for idx, subchapter_section in enumerate(sections[1:]):
         subchapter_idx = idx + 1
-        subchapter_id = f'{id_}_sub{subchapter_idx}'
+        chapter_id = chapter['id']
+        subchapter_id = f'{chapter_id}_sub{subchapter_idx}'
         rendered_text += f'    <section epub:type="chapter" id="{subchapter_id}" class="subchapter">\n'
 
         result = render_section(subchapter_section,
                                 base_header_level + 1,
-                                path=path,
+                                path=chapter['path'],
                                 footnote_chapter_fpath=footnote_chapter_fpath,
                                 bibliography_chapter_fpath=bibliography_chapter_fpath,
                                 bibliography_db=bibliography_db,
@@ -410,10 +399,7 @@ def render_chapter(sections, idx, path, base_header_level,
     rendered_text += '  </section>'
     result = {'rendered_text': rendered_text,
               'footnote_definitions': footnote_definitions,
-              'bibliography_entries_seen': bibliography_entries_seen,
-              'id': id_}
-    if title:
-        result['title'] = title
+              'bibliography_entries_seen': bibliography_entries_seen}
     if subchapter_ids_and_titles:
         result['subchapter_titles'] = subchapter_ids_and_titles
     return result
@@ -509,6 +495,55 @@ def _create_part_path(idx, out_dir):
     return path
 
 
+def _check_first_subsection_in_chapter_is_not_subchapter(chapter):
+    sections = chapter['subsections']
+    first_section = sections[0]
+    if first_section['is_subchapter']:
+        msg = 'The chapter has no file before first subchapter: {}\n'.format(' ,'.join(first_section['md_files']))
+        raise ValueError(msg)
+
+
+def _get_first_header_line(lines):
+    for line in lines:
+        if line.startswith('#'):
+            return line
+
+
+def _get_chapter_id(chapter, idx):
+    lines = _get_lines_in_files(chapter['subsections'][0]['md_files'])
+    first_header = _get_first_header_line(lines)
+    if not first_header:
+        raise ValueError('First chapter subsection has no header line: ' + str(chapter))
+    res = _parse_header_line(first_header)
+    title = res['text']
+    id_ = res.get(id, f'chapter_{idx}')
+    return title, id_
+
+
+def _get_part_id(part, idx):
+
+    if 'md_file' in part:
+        header_lines = [line for line in part['md_file'].open('rt') if line.startswith('#')]
+    else:
+        header_lines = []
+
+    if len(header_lines) > 1:
+        raise ValueError(f'Only one header line is allowed in part markdown file {md_file}')
+
+    if header_lines:
+        res = _parse_header_line(header_lines[0])
+        id_ = res.get('id')
+        title = res['text']
+    else:
+        id_ = None
+        title = None
+
+    if id_ is None:
+        id_ = f'chapter_{idx}'
+
+    return title, id_
+
+
 def _get_parts_and_chapters(book_base_dir, out_dir):
     chapters = []
     parts = []
@@ -530,16 +565,8 @@ def _get_parts_and_chapters(book_base_dir, out_dir):
                 if len(md_files) > 1:
                     msg = 'Only one markdown file is allowed in part directory: {}'.format(' ,'.join(md_files))
                     raise ValueError(msg)
-                md_file = md_files[0]
-                header_lines = [line for line in md_file.open('rt') if line.startswith('#')]
-                if len(header_lines) > 1:
-                    raise ValueError(f'Only one header line is allowed in part markdown file {md_file}')
-                if header_lines:
-                    result = _parse_header_line(header_lines[0])
-                    header = result['text']
-                    part['header'] = header
-                    if 'id' in result:
-                        part['id'] = result['id']
+
+                part['md_file'] = md_files[0]
             parts.append(part)
         elif dir_kind == 'chapter':
             chapters.append({'dir_path': dir_})
@@ -619,16 +646,27 @@ def _get_parts_and_chapters(book_base_dir, out_dir):
             part_idx += 1
             section['idx'] = part_idx
             section['path'] = _create_part_path(part_idx, out_dir)
+            section['id'], title = _get_part_id(section, part_idx)
+            if title:
+                section['title'] = title
 
             for chapter in section['chapters']:
                 chapter_idx += 1
                 chapter['idx'] = chapter_idx
                 chapter['path'] = _create_chapter_path(chapter_idx, out_dir)
+                chapter['subsections'] = _get_section_files_in_chapter(chapter['dir_path'])
+                _check_first_subsection_in_chapter_is_not_subchapter(chapter)
+                chapter['id'], chapter['title'] = _get_chapter_id(chapter,
+                                                                  chapter_idx)
 
         if section['kind'] == 'chapter':
             chapter_idx += 1
             section['idx'] = chapter_idx
             section['path'] = _create_chapter_path(chapter_idx, out_dir)
+            section['subsections'] = _get_section_files_in_chapter(section['chapter']['dir_path'])
+            _check_first_subsection_in_chapter_is_not_subchapter(section)
+            section['id'], section['title'] = _get_chapter_id(section,
+                                                              chapter_idx)
 
     return {'chapters': chapters,
             'parts': parts,
@@ -729,14 +767,8 @@ def _compile_chapter(chapter,
                      endnote_chapter_fname,
                      bibliography_chapter_fpath,
                      bibliography_db, lang):
-    if 'chapter' in chapter:
-        sections = _get_section_files_in_chapter(chapter['chapter']['dir_path'])
-    else:
-        sections = _get_section_files_in_chapter(chapter['dir_path'])
 
-    result = render_chapter(sections,
-                            idx=chapter['idx'],
-                            path=chapter['path'],
+    result = render_chapter(chapter,
                             base_header_level=base_header_level,
                             footnote_chapter_fpath=endnote_chapter_fname,
                             bibliography_chapter_fpath=bibliography_chapter_fpath,
@@ -751,10 +783,7 @@ def _compile_chapter(chapter,
     fhand.write('\n</body>\n</html>\n')
     fhand.flush()
     return {'footnote_definitions': result['footnote_definitions'],
-            'bibliography_entries_seen': result['bibliography_entries_seen'],
-            'id': result['id'],
-            'title': chapter_title,
-            }
+            'bibliography_entries_seen': result['bibliography_entries_seen']}
 
 
 def _compile_part(chapter,
@@ -805,9 +834,9 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
             footnote_definitions.extend(result['footnote_definitions'])
             bibliography_entries_seen.update(result['bibliography_entries_seen'])
 
-            toc_entry = {'id': result['id'],
+            toc_entry = {'id': part_or_chapter['id'],
                          'path': part_or_chapter['path'],
-                         'title': result['title'],
+                         'title': part_or_chapter['title'],
                          'level': 1}
             toc_info.append(toc_entry)
         elif part_or_chapter['kind'] == 'part':
@@ -818,9 +847,9 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
                                    bibliography_db=bibliography_db,
                                    lang=lang)
 
-            toc_entry = {'id': result['id'],
+            toc_entry = {'id': part_or_chapter['id'],
                          'path': part_or_chapter['path'],
-                         'title': result['title'],
+                         'title': part_or_chapter['title'],
                          'level': 1}
             toc_info.append(toc_entry)
 
@@ -834,9 +863,9 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
                 footnote_definitions.extend(result['footnote_definitions'])
                 bibliography_entries_seen.update(result['bibliography_entries_seen'])
 
-                toc_entry = {'id': result['id'],
+                toc_entry = {'id': chapter['id'],
                              'path': chapter['path'],
-                             'title': result['title'],
+                             'title': chapter['title'],
                              'level': 2}
                 toc_info.append(toc_entry)
 
