@@ -809,7 +809,7 @@ def _compile_chapter(chapter,
                             bibliography_db=bibliography_db,
                             sections_by_id=sections_by_id,
                             lang=lang)
-    chapter_title = result.get('title')
+    chapter_title = chapter.get('title')
 
     fhand = chapter['path'].open('wt')
     fhand.write(CHAPTER_HEADER_HTML.format(title=chapter_title))
@@ -827,11 +827,11 @@ def _compile_part(chapter,
     idx = chapter['idx']
     id_ = f'part_{idx}'
 
-    header = chapter.get('part', {}).get('header', None)
+    header = chapter.get('title', None)
     result = _render_part(part_id=id_,
                           header=header,
                           sections_by_id=sections_by_id)
-    title = result.get('title')
+    title = chapter.get('title')
 
     fhand = chapter['path'].open('wt')
     fhand.write(CHAPTER_HEADER_HTML.format(title=title))
@@ -964,6 +964,5 @@ if __name__ == '__main__':
     compile_book(Path('book_test'), out_dir, Path('bibliografia_arte.bibtex'), lang='es')
 
 # TODO:
-# - IDs de capítulos para poder hacer referencias
 # - index
 # - comentarios
