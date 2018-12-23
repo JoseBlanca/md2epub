@@ -516,14 +516,13 @@ def _get_chapter_id(chapter, idx):
         raise ValueError('First chapter subsection has no header line: ' + str(chapter))
     res = _parse_header_line(first_header)
     title = res['text']
-    id_ = res.get(id, f'chapter_{idx}')
+    id_ = res.get('id', f'chapter_{idx}')
     return title, id_
 
 
 def _get_part_id(part, idx):
-
-    if 'md_file' in part:
-        header_lines = [line for line in part['md_file'].open('rt') if line.startswith('#')]
+    if 'md_file' in part['part']:
+        header_lines = [line for line in part['part']['md_file'].open('rt') if line.startswith('#')]
     else:
         header_lines = []
 
@@ -646,7 +645,7 @@ def _get_parts_and_chapters(book_base_dir, out_dir):
             part_idx += 1
             section['idx'] = part_idx
             section['path'] = _create_part_path(part_idx, out_dir)
-            section['id'], title = _get_part_id(section, part_idx)
+            title, section['id'] = _get_part_id(section, part_idx)
             if title:
                 section['title'] = title
 
@@ -656,7 +655,7 @@ def _get_parts_and_chapters(book_base_dir, out_dir):
                 chapter['path'] = _create_chapter_path(chapter_idx, out_dir)
                 chapter['subsections'] = _get_section_files_in_chapter(chapter['dir_path'])
                 _check_first_subsection_in_chapter_is_not_subchapter(chapter)
-                chapter['id'], chapter['title'] = _get_chapter_id(chapter,
+                chapter['title'], chapter['id'] = _get_chapter_id(chapter,
                                                                   chapter_idx)
 
         if section['kind'] == 'chapter':
@@ -665,9 +664,9 @@ def _get_parts_and_chapters(book_base_dir, out_dir):
             section['path'] = _create_chapter_path(chapter_idx, out_dir)
             section['subsections'] = _get_section_files_in_chapter(section['chapter']['dir_path'])
             _check_first_subsection_in_chapter_is_not_subchapter(section)
-            section['id'], section['title'] = _get_chapter_id(section,
+            section['title'], section['id'] = _get_chapter_id(section,
                                                               chapter_idx)
-
+    #pprint(sections)
     return {'chapters': chapters,
             'parts': parts,
             'parts_and_chapters': sections}
