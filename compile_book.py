@@ -7,6 +7,7 @@ from collections import OrderedDict, Counter
 from pprint import pprint
 
 import mistune
+from ebooklib import epub
 
 from citations import (load_bibliography_db, create_citation_note,
                        create_bibliography_citation)
@@ -705,39 +706,31 @@ def _get_parts_and_chapters(book_base_dir, out_dir):
             'sections_by_id': sections_by_id}
 
 
-def _add_endnotes_chapter(path, chapter_id, header_level,
+def _add_endnotes_chapter(chapter_title, chapter_id, header_level,
                           footnote_definitions, lang):
-    fhand = path.open('wt')
-    chapter_title = ENDNOTE_CHAPTER_TITLE[lang]
-    fhand.write(CHAPTER_HEADER_HTML.format(title=chapter_title))
-    fhand.write('<body>\n')
-    fhand.write(CHAPTER_SECTION_LINE.format(chapter_id=chapter_id,
-                                            epub_type='endnotes'))
+    html = CHAPTER_SECTION_LINE.format(chapter_id=chapter_id,
+                                       epub_type='endnotes')
 
     header = f'  <h{header_level}>{chapter_title}</h{header_level}>\n'
-    fhand.write(header)
+    html += header
 
-    fhand.write('<ol role="doc-endnotes">')
+    html += '<ol role="doc-endnotes">'
     for footnote_definition in footnote_definitions:
-        fhand.write(footnote_definition['footnote_definition_li'])
-    fhand.write('</ol>\n')
+        html += footnote_definition['footnote_definition_li']
+    html += '</ol>\n'
 
-    fhand.write('</section>\n')
-    fhand.write('\n</body>\n</html>\n')
+    html += '</section>\n'
+    return {'html': html}
 
 
-def _add_bibliography_chapter(path, chapter_id, header_level,
+def _add_bibliography_chapter(chapter_title, chapter_id, header_level,
                              bibliography_entries_seen,
                              bibliography_db, lang):
-    fhand = path.open('wt')
-    chapter_title = BIBLIOGRAPHY_CHAPTER_TITLE[lang]
-    fhand.write(CHAPTER_HEADER_HTML.format(title=chapter_title))
-    fhand.write('<body>\n')
-    fhand.write(CHAPTER_SECTION_LINE.format(chapter_id=chapter_id,
-                                            epub_type='endnotes'))
+    html = CHAPTER_SECTION_LINE.format(chapter_id=chapter_id,
+                                       epub_type='endnotes')
 
     header = f'  <h{header_level}>{chapter_title}</h{header_level}>\n'
-    fhand.write(header)
+    html += header
 
     htmls = []
     for bibliography_id in bibliography_entries_seen:
@@ -745,35 +738,33 @@ def _add_bibliography_chapter(path, chapter_id, header_level,
         htmls.append(citation_html)
     htmls.sort()
 
-    fhand.write('<ul role="Bibliography">')
-    for html in htmls:
-        fhand.write(f'<li>{html}</li>')
-    fhand.write('</ul>\n')
+    html += '<ul role="Bibliography">'
+    for html_li in htmls:
+        html += f'<li>{html_li}</li>'
+    html += '</ul>\n'
 
-    fhand.write('</section>\n')
-    fhand.write('\n</body>\n</html>\n')
+    html += '</section>\n'
+    html += '\n</body>\n</html>\n'
+    return {'html': html}
 
 
-def _add_toc_chapter(path, chapter_id,
+def _add_toc_chapter(chapter_title, chapter_id,
                      header_level, toc_info, lang):
-    fhand = path.open('wt')
-    chapter_title = TOC_CHAPTER_TITLE[lang]
-    fhand.write(CHAPTER_HEADER_HTML.format(title=chapter_title))
-    fhand.write('<body>\n')
-    fhand.write(CHAPTER_SECTION_LINE.format(chapter_id=chapter_id,
-                                            epub_type='toc'))
 
-    fhand.write('<nav epub:type="toc">\n')
-    fhand.write(f'<h1>{TOC_CHAPTER_TITLE[lang]}</h1>')
-    fhand.write('<ol>\n')
+    html = CHAPTER_SECTION_LINE.format(chapter_id=chapter_id,
+                                       epub_type='toc')
+
+    html += '<nav epub:type="toc">\n'
+    html += f'<h1>{TOC_CHAPTER_TITLE[lang]}</h1>'
+    html += '<ol>\n'
     current_level = 1
     for toc_entry in toc_info:
         toc_level = toc_entry['level']
         if toc_level > current_level:
-            fhand.write('<ol>\n')
+            html += '<ol>\n'
             current_level = toc_level
         if toc_level < current_level:
-            fhand.write('</ol>\n')
+            html += '</ol>\n'
             current_level = toc_level
         if 'path' not in toc_entry:
             if 'title' in toc_entry and toc_entry["title"]:
@@ -783,15 +774,16 @@ def _add_toc_chapter(path, chapter_id,
         else:
             fname = toc_entry['path'].name
             li = f'<li><a href="{fname}#{toc_entry["id"]}">{toc_entry["title"]}</a></li>\n'
-        fhand.write(li)
+        html += li
 
     for _ in range(current_level, 1, -1):
-        fhand.write('</ol>\n')
+        html += '</ol>\n'
 
-    fhand.write('</ol>')
-    fhand.write('</nav>\n')
-    fhand.write('</section>\n')
-    fhand.write('\n</body>\n</html>\n')
+    html += '</ol>'
+    html += '</nav>\n'
+    html += '</section>\n'
+    html += '\n</body>\n</html>\n'
+    return {'html': html}
 
 
 def _compile_chapter(chapter,
@@ -809,43 +801,34 @@ def _compile_chapter(chapter,
                             bibliography_db=bibliography_db,
                             sections_by_id=sections_by_id,
                             lang=lang)
-    chapter_title = chapter.get('title')
 
-    fhand = chapter['path'].open('wt')
-    fhand.write(CHAPTER_HEADER_HTML.format(title=chapter_title))
-    fhand.write('<body>\n')
-    fhand.write(result['rendered_text'])
-    fhand.write('\n</body>\n</html>\n')
-    fhand.flush()
     return {'footnote_definitions': result['footnote_definitions'],
-            'bibliography_entries_seen': result['bibliography_entries_seen']}
+            'bibliography_entries_seen': result['bibliography_entries_seen'],
+            'html': result['rendered_text']}
 
 
 def _compile_part(chapter,
                   endnote_chapter_fname, bibliography_chapter_fpath,
                   bibliography_db, sections_by_id, lang):
-    idx = chapter['idx']
-    id_ = f'part_{idx}'
 
     header = chapter.get('title', None)
-    result = _render_part(part_id=id_,
+    result = _render_part(part_id=chapter['id'],
                           header=header,
                           sections_by_id=sections_by_id)
-    title = chapter.get('title')
 
-    fhand = chapter['path'].open('wt')
-    fhand.write(CHAPTER_HEADER_HTML.format(title=title))
-    fhand.write('<body>\n')
-    fhand.write(result['rendered_text'])
-    fhand.write('\n</body>\n</html>\n')
-    fhand.flush()
-    return {'id': id_,
-            'title': title}
+    return {'html': result['rendered_text']}
 
 
-def compile_book(book_base_dir, out_dir, bibtex_path, lang):
+def create_epub(book_base_dir, out_path, bibliography_path, metadata):
+    book = epub.EpubBook()
 
-    bibliography_db = load_bibliography_db(bibtex_path)
+    book.set_identifier(metadata['id'])
+    book.set_title(metadata['title'])
+    lang = metadata['lang']
+    book.set_language(lang)
+    book.add_author(metadata['author'])
+
+    bibliography_db = load_bibliography_db(bibliography_path)
     endnote_chapter_fname = f'endnotes.{HTML_FILES_EXTENSION}'
     bibliography_chapter_fpath = f'bibliography.{HTML_FILES_EXTENSION}'
     toc_chapter_fpath = f'toc.{HTML_FILES_EXTENSION}'
@@ -857,9 +840,9 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
     toc_info = []
     parts_are_used = False
 
+    spine = []
     for section in sections['parts_and_chapters']:
         if section['kind'] == 'chapter':
-
             result = _compile_chapter(section,
                                       base_header_level=1,
                                       endnote_chapter_fname=endnote_chapter_fname,
@@ -870,11 +853,19 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
             footnote_definitions.extend(result['footnote_definitions'])
             bibliography_entries_seen.update(result['bibliography_entries_seen'])
 
+            epub_chapter = epub.EpubHtml(title=section['title'],
+                                         file_name=section['path'].name,
+                                         lang=lang)
+            epub_chapter.set_content(result['html'])
+            book.add_item(epub_chapter)
+            spine.append(epub_chapter)
+
             toc_entry = {'id': section['id'],
                          'path': section['path'],
                          'title': section['title'],
                          'level': 1}
             toc_info.append(toc_entry)
+
         elif section['kind'] == 'part':
             parts_are_used = True
             result = _compile_part(section,
@@ -883,6 +874,12 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
                                    bibliography_db=bibliography_db,
                                    sections_by_id=sections['sections_by_id'],
                                    lang=lang)
+            epub_chapter = epub.EpubHtml(title=section['title'],
+                                         file_name=section['path'].name,
+                                         lang=lang)
+            epub_chapter.set_content(result['html'])
+            book.add_item(epub_chapter)
+            spine.append(epub_chapter)
 
             toc_entry = {'id': section['id'],
                          'path': section['path'],
@@ -901,11 +898,19 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
                 footnote_definitions.extend(result['footnote_definitions'])
                 bibliography_entries_seen.update(result['bibliography_entries_seen'])
 
+                epub_chapter = epub.EpubHtml(title=chapter['title'],
+                                             file_name=chapter['path'].name,
+                                             lang=lang)
+                epub_chapter.set_content(result['html'])
+                book.add_item(epub_chapter)
+                spine.append(epub_chapter)
+
                 toc_entry = {'id': chapter['id'],
                              'path': chapter['path'],
                              'title': chapter['title'],
                              'level': 2}
                 toc_info.append(toc_entry)
+
 
     if (footnote_definitions or bibliography_entries_seen) and parts_are_used:
         part_id = 'part_back_matter'
@@ -920,28 +925,46 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
     if footnote_definitions:
         chapter_path = out_dir / HTML_DIR / endnote_chapter_fname
         chapter_id = f'chapter_endnotes'
+        chapter_title = ENDNOTE_CHAPTER_TITLE[lang]
         base_header_level = 2 if parts_are_used else 1
-        _add_endnotes_chapter(chapter_path,
-                              chapter_id=chapter_id,
-                              header_level=base_header_level,
-                              footnote_definitions=footnote_definitions,
-                              lang=lang)
+        result = _add_endnotes_chapter(chapter_title,
+                                       chapter_id=chapter_id,
+                                       header_level=base_header_level,
+                                       footnote_definitions=footnote_definitions,
+                                       lang=lang)
+
+        epub_chapter = epub.EpubHtml(title=chapter_title,
+                                     file_name=chapter_path.name,
+                                     lang=lang)
+        epub_chapter.set_content(result['html'])
+        book.add_item(epub_chapter)
+        spine.append(epub_chapter)
+
         toc_entry = {'id': chapter_id,
                      'path': chapter_path,
                      'fname': endnote_chapter_fname,
                      'title': ENDNOTE_CHAPTER_TITLE[lang],
                      'level': toc_level_for_appendix_chapters}
         toc_info.append(toc_entry)
+
     if bibliography_entries_seen:
         chapter_path = out_dir / HTML_DIR / bibliography_chapter_fpath
         chapter_id = f'chapter_bibliography'
+        chapter_title = BIBLIOGRAPHY_CHAPTER_TITLE[lang]
         base_header_level = 2 if parts_are_used else 1
-        _add_bibliography_chapter(chapter_path,
-                                 chapter_id=chapter_id,
-                                 header_level=base_header_level,
-                                 bibliography_entries_seen=bibliography_entries_seen,
-                                 bibliography_db=bibliography_db,
-                                 lang=lang)
+        result = _add_bibliography_chapter(chapter_title,
+                                           chapter_id=chapter_id,
+                                           header_level=base_header_level,
+                                           bibliography_entries_seen=bibliography_entries_seen,
+                                           bibliography_db=bibliography_db,
+                                           lang=lang)
+        epub_chapter = epub.EpubHtml(title=chapter_title,
+                                     file_name=chapter_path.name,
+                                     lang=lang)
+        epub_chapter.set_content(result['html'])
+        book.add_item(epub_chapter)
+        spine.append(epub_chapter)
+
         toc_entry = {'id': chapter_id,
                      'path': chapter_path,
                      'fname': bibliography_chapter_fpath,
@@ -952,17 +975,40 @@ def compile_book(book_base_dir, out_dir, bibtex_path, lang):
     if toc_info:
         chapter_path = out_dir / HTML_DIR / toc_chapter_fpath
         chapter_id = 'toc'
-        _add_toc_chapter(chapter_path,
+        chapter_title = TOC_CHAPTER_TITLE[lang]
+        result = _add_toc_chapter(chapter_title,
                          chapter_id=chapter_id,
                          header_level=1,
                          toc_info=toc_info,
                          lang=lang)
+        epub_chapter = epub.EpubHtml(title=chapter_title,
+                                     file_name=chapter_path.name,
+                                     lang=lang)
+        epub_chapter.set_content(result['html'])
+        book.add_item(epub_chapter)
+        spine.insert(0, epub_chapter)
+
+    book.spine = spine
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    epub.write_epub(str(out_path), book)
+
 
 if __name__ == '__main__':
     out_dir = Path('rendered_book')
     out_dir.mkdir(exist_ok=True)
-    compile_book(Path('book_test'), out_dir, Path('bibliografia_arte.bibtex'), lang='es')
+
+    metadata = {'id': 'arteDudaIntroduccionFilosoficaCiencia',
+                'title': 'El arte de la duda',
+                'author': 'Jose Blanca',
+                'lang': 'es'}
+
+    create_epub(book_base_dir=Path('book_test'),
+                out_path=Path('book_test.epub'),
+                bibliography_path=Path('bibliografia_arte.bibtex'),
+                metadata=metadata)
 
 # TODO:
+# - fix links that go back from the endnotes
 # - index
 # - comentarios
