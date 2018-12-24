@@ -7,6 +7,8 @@ from collections import OrderedDict, Counter
 from pprint import pprint
 import zipfile
 import shutil
+import subprocess
+import sys
 
 import mistune
 from ebooklib import epub
@@ -18,6 +20,8 @@ EPUB_VERSION = 'old'
 
 ENDNOTES_EPUB_TYPE = {'old': 'rearnotes',
                       '3.1': 'endnotes'}
+
+EPUBCHECK_JAR = 'epubcheck-4.0.2/epubcheck.jar'
 
 _HEADER_RE = re.compile('^(?P<pounds>#+)(?P<text>[^{]+)')
 _HEADER_WITH_ID_RE = re.compile('^(?P<pounds>#+)(?P<text>[^{]+) *{#(?P<id>[^}]+)}$')
@@ -1012,6 +1016,15 @@ def unzip_epub(ebook_path, out_dir):
         epubzip.extractall(path=out_dir)
 
 
+def check_epub(ebook_path):
+    cmd = ['java', '-jar', EPUBCHECK_JAR, str(ebook_path)]
+    completed_process = subprocess.run(cmd, capture_output=True)
+
+    if completed_process.returncode:
+        sys.stdout.write(completed_process.stdout.decode())
+        sys.stderr.write(completed_process.stderr.decode())
+
+
 if __name__ == '__main__':
     out_dir = Path('rendered_book')
     out_dir.mkdir(exist_ok=True)
@@ -1029,7 +1042,8 @@ if __name__ == '__main__':
 
     unzip_epub(ebook_path, Path('rendered_book'))
 
+    check_epub(ebook_path)
+
 # TODO:
 # - index
 # - comentarios
-# - epubchecker, google libros
