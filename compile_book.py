@@ -764,10 +764,10 @@ def _add_toc_chapter(chapter_title, chapter_id,
     for toc_entry in toc_info:
         toc_level = toc_entry['level']
         if toc_level > current_level:
-            html += '<ol>\n'
+            html += '<li><ol>\n'
             current_level = toc_level
         if toc_level < current_level:
-            html += '</ol>\n'
+            html += '</ol></li>\n'
             current_level = toc_level
         if 'path' not in toc_entry:
             if 'title' in toc_entry and toc_entry["title"]:
@@ -780,7 +780,7 @@ def _add_toc_chapter(chapter_title, chapter_id,
         html += li
 
     for _ in range(current_level, 1, -1):
-        html += '</ol>\n'
+        html += '</ol></li>\n'
 
     html += '</ol>'
     html += '</nav>\n'
