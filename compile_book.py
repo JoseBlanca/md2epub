@@ -114,7 +114,7 @@ def _citation_processor(citation, bibliography_chapter_fpath,
     li_id = f'ftd_{footnote_id}'
     chapter_fpath = str(chapter_path)
     back_href_to_footnote = f'{chapter_fpath}#ft_{footnote_id}'
-    footnote_definition_text = f'<li id= "{li_id}" role="doc-endnote"><p>{footnote_definition_content}</p><p><a href="{back_href_to_footnote}" role="doc-backlink">{BACK_ENDNOTE_TEXT[lang]}</a>.</p></li>'
+    footnote_definition_text = f'<li id= "{li_id}" role="doc-endnote"><p>{footnote_definition_content}</p></li>'
 
     bibliography_entries_seen.add(citation_id)
 
