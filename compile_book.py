@@ -844,6 +844,7 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
     parts_are_used = False
 
     spine = []
+    toc = []
     for section in sections['parts_and_chapters']:
         if section['kind'] == 'chapter':
             result = _compile_chapter(section,
@@ -862,6 +863,7 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
             epub_chapter.set_content(result['html'])
             book.add_item(epub_chapter)
             spine.append(epub_chapter)
+            toc.append(epub_chapter)
 
             toc_entry = {'id': section['id'],
                          'path': section['path'],
@@ -890,6 +892,7 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
                          'level': 1}
             toc_info.append(toc_entry)
 
+            part_toc_chapters = []
             for chapter in section['chapters']:
                 result = _compile_chapter(chapter,
                                           base_header_level=2,
@@ -913,7 +916,8 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
                              'title': chapter['title'],
                              'level': 2}
                 toc_info.append(toc_entry)
-
+                part_toc_chapters.append(epub_chapter)
+            part_toc = toc.append([epub.Section(section['title']), part_toc_chapters])
 
     if (footnote_definitions or bibliography_entries_seen) and parts_are_used:
         part_id = 'part_back_matter'
@@ -990,6 +994,8 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
         epub_chapter.set_content(result['html'])
         book.add_item(epub_chapter)
         spine.insert(0, epub_chapter)
+
+        book.toc = toc
 
     book.spine = spine
     book.add_item(epub.EpubNcx())
