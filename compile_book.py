@@ -14,6 +14,10 @@ from ebooklib import epub
 from citations import (load_bibliography_db, create_citation_note,
                        create_bibliography_citation)
 
+EPUB_VERSION = 'old'
+
+ENDNOTES_EPUB_TYPE = {'old': 'rearnotes',
+                      '3.1': 'endnotes'}
 
 _HEADER_RE = re.compile('^(?P<pounds>#+)(?P<text>[^{]+)')
 _HEADER_WITH_ID_RE = re.compile('^(?P<pounds>#+)(?P<text>[^{]+) *{#(?P<id>[^}]+)}$')
@@ -708,7 +712,7 @@ def _get_parts_and_chapters(book_base_dir, out_dir):
 def _add_endnotes_chapter(chapter_title, chapter_id, header_level,
                           footnote_definitions, lang):
     html = CHAPTER_SECTION_LINE.format(chapter_id=chapter_id,
-                                       epub_type='endnotes')
+                                       epub_type=ENDNOTES_EPUB_TYPE[EPUB_VERSION])
 
     header = f'  <h{header_level}>{chapter_title}</h{header_level}>\n'
     html += header
@@ -726,7 +730,7 @@ def _add_bibliography_chapter(chapter_title, chapter_id, header_level,
                              bibliography_entries_seen,
                              bibliography_db, lang):
     html = CHAPTER_SECTION_LINE.format(chapter_id=chapter_id,
-                                       epub_type='endnotes')
+                                       epub_type='bibliography')
 
     header = f'  <h{header_level}>{chapter_title}</h{header_level}>\n'
     html += header
