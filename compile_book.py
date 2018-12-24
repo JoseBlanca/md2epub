@@ -5,6 +5,8 @@ import re
 from functools import partial
 from collections import OrderedDict, Counter
 from pprint import pprint
+import zipfile
+import shutil
 
 import mistune
 from ebooklib import epub
@@ -78,12 +80,9 @@ def _footnote_definition_processor(footnote_definition,
     if _FOOTNOTE_DEFINITION_ID_COUNTS[footnote_id] > 1:
         raise RuntimeError('More than one footnote definition for footnote ID: ' + footnote_id)
 
-    chapter_fpath = str(chapter_path)
-    back_href_to_footnote = f'{chapter_fpath}#ft_{footnote_id}'
     li_id = f'ftd_{footnote_id}'
     content = footnote_definition['match'].group('content').strip()
-
-    text = f'<li id= "{li_id}" role="doc-endnote"><p>{content}</p><p><a href="{back_href_to_footnote}" role="doc-backlink">{BACK_ENDNOTE_TEXT[lang]}</a>.</p></li>'
+    text = f'<li id= "{li_id}" role="doc-endnote"><p>{content}</p></li>'
 
     return {'footnote_definition_li': text,
             'footnote_id': footnote_id}
@@ -994,6 +993,15 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
     epub.write_epub(str(out_path), book)
 
 
+def unzip_epub(ebook_path, out_dir):
+
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+
+    with zipfile.ZipFile(ebook_path) as epubzip:
+        epubzip.extractall(path=out_dir)
+
+
 if __name__ == '__main__':
     out_dir = Path('rendered_book')
     out_dir.mkdir(exist_ok=True)
@@ -1003,12 +1011,15 @@ if __name__ == '__main__':
                 'author': 'Jose Blanca',
                 'lang': 'es'}
 
+    ebook_path = Path('book_test.epub')
     create_epub(book_base_dir=Path('book_test'),
-                out_path=Path('book_test.epub'),
+                out_path=ebook_path,
                 bibliography_path=Path('bibliografia_arte.bibtex'),
                 metadata=metadata)
 
+    unzip_epub(ebook_path, Path('rendered_book'))
+
 # TODO:
-# - fix links that go back from the endnotes
 # - index
 # - comentarios
+# - epubchecker, google libros
