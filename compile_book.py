@@ -268,7 +268,23 @@ def _process_citations_and_footnotes(md_text, chapter_path,
             }
 
 
+def _remove_comments(md_text):
+    lines = []
+    in_comment = False
+    for line in md_text.splitlines():
+        if line.startswith('%%%'):
+            if in_comment:
+                in_comment = False
+            else:
+                in_comment = True
+            continue
+        if line.startswith('%'):
+            continue
+        lines.append(line)
+    return '\n'.join(lines)
+
 def _process_basic_markdown(md_text):
+    md_text = _remove_comments(md_text)
     renderer = mistune.Renderer(use_xhtml=True)
     render_markdown = mistune.Markdown(renderer)
     xhtml_text = render_markdown(md_text)
@@ -1046,4 +1062,3 @@ if __name__ == '__main__':
 
 # TODO:
 # - index
-# - comentarios
