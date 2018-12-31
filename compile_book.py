@@ -9,6 +9,8 @@ import zipfile
 import shutil
 import subprocess
 import sys
+import tempfile
+import os
 
 import mistune
 from ebooklib import epub
@@ -192,8 +194,12 @@ def _build_internal_link(text, anchor_section):
 def _internal_link_processor(internal_link, sections_by_id):
     text = internal_link['match'].group('text')
     link_id = internal_link['match'].group('link_id')
+    section = sections_by_id[link_id]
+    id_ = section['id']
+    fname = section['path'].name
+    link = fname
 
-    link = _build_internal_link(text, sections_by_id[link_id])
+    link = _build_link(link, text, id_=id_, no_id=True)
     return {'processed_text': link}
 
 
@@ -589,7 +595,7 @@ def _get_part_id(part, idx):
         title = None
 
     if id_ is None:
-        id_ = f'chapter_{idx}'
+        id_ = f'part_{idx}'
 
     return title, id_
 
@@ -771,22 +777,29 @@ def _add_bibliography_chapter(chapter_title, chapter_id, header_level,
     return {'html': html}
 
 
-def _add_toc_chapter(chapter_title, chapter_id,
+def _add_toc_chapter_old(chapter_title, chapter_id,
                      header_level, toc_info, lang):
 
-    html = CHAPTER_SECTION_LINE.format(chapter_id=chapter_id,
-                                       epub_type='toc')
-
-    html += '<nav epub:type="toc">\n'
+    html = '<nav epub:type="toc">\n'
     html += f'<h1>{TOC_CHAPTER_TITLE[lang]}</h1>'
     html += '<ol>\n'
+
+    ncx_nav = ''
+
     current_level = 1
+    play_order = 1
     for toc_entry in toc_info:
         toc_level = toc_entry['level']
+        #print(current_level, toc_level)
         if toc_level > current_level:
+            #ncx_nav += f'<navPoint id="{toc_entry["id"]}" playOrder="{play_order}">\n'
+            #print(f'<navPoint id="{toc_entry["id"]}" playOrder="{play_order}">\n')
+            #play_order += 1
             html += '<li><ol>\n'
             current_level = toc_level
         if toc_level < current_level:
+            #print('</navPoint>\n')
+            #ncx_nav += '</navPoint>\n'
             html += '</ol></li>\n'
             current_level = toc_level
         if 'path' not in toc_entry:
@@ -796,17 +809,147 @@ def _add_toc_chapter(chapter_title, chapter_id,
                 li = ''
         else:
             fname = toc_entry['path'].name
+            ncx_nav_item = f'''<navPoint id="{toc_entry["id"]}" playOrder="{play_order}">
+            <navLabel>
+                <text>{toc_entry["title"]}</text>
+            </navLabel>
+            <content src="{fname}#{toc_entry["id"]}" />
+</navPoint>\n'''
+            ncx_nav += ncx_nav_item
+            #print(ncx_nav_item)
+            play_order += 1
             li = f'<li><a href="{fname}#{toc_entry["id"]}">{toc_entry["title"]}</a></li>\n'
         html += li
 
     for _ in range(current_level, 1, -1):
         html += '</ol></li>\n'
+        #ncx_nav += '</navPoint>\n'
 
     html += '</ol>'
     html += '</nav>\n'
+    html_nav = html
+
+    html = CHAPTER_SECTION_LINE.format(chapter_id=chapter_id,
+                                       epub_type='toc')
+    html += html_nav
     html += '</section>\n'
     html += '\n</body>\n</html>\n'
-    return {'html': html}
+    #print(ncx_nav)
+    return {'html': html,
+            'ncx_nav': ncx_nav,
+            'html_nav': html_nav}
+
+
+def _build_ncx_nav_item_xml(item_id, play_order, title, fname):
+    ncx_nav_item = f'''<navPoint id="{item_id}" playOrder="{play_order}">
+    <navLabel>
+        <text>{title}</text>
+    </navLabel>
+    <content src="{fname}" />
+</navPoint>\n'''
+    return ncx_nav_item
+
+
+def _build_link(link, text, id_=None, no_id=None):
+    if id_ and not no_id:
+        li = f'<a href="{link}#{id_}">{text}</a>'
+    elif link and text:
+        li = f'<a href="{link}">{text}</a>'
+    return li
+
+
+def _build_nav_li(li_item, no_id=False):
+    id_ = li_item.get('id', li_item.get('chapter_id', li_item.get('part_id')))
+
+    path = li_item.get('path')
+    fname = path.name if path else None
+    path_str = f'../EPUB/{fname}'
+    link = fname
+    title = li_item['title']
+
+    if link:
+        li = _build_link(link, title, id_=id_, no_id=no_id)
+    else:
+        li = f'<span>{title}</span>'
+    return li
+
+
+def _build_span_li(li_item):
+    title = li_item['title']
+    li = f'<span>{title}</span>'
+    return li
+
+
+def _add_toc_chapter(chapter_title, chapter_id,
+                     header_level, toc_info, lang):
+
+    current_level = 1
+    play_order = 1
+    root_ol_items = {'id': 'root',
+                     'li_items': []}
+    current_ol_items = root_ol_items
+    for toc_entry in toc_info:
+        #pprint(toc_entry)
+        if toc_entry['kind'] == 'chapter':
+            fname = toc_entry['path'].name
+            ncx_nav_item = _build_ncx_nav_item_xml(toc_entry["id"],
+                                                   play_order,
+                                                   toc_entry["title"],
+                                                   fname)
+            play_order += 1
+            li = _build_nav_li(toc_entry, no_id=True)
+            current_ol_items['li_items'].append({'li': f'<li>{li}</li>\n',
+                                                 'ncx_nav': ncx_nav_item})
+        elif toc_entry['kind'] == 'part':
+            current_part_id = current_ol_items['id']
+            part_id = toc_entry['id']
+            if current_part_id != part_id:
+                ol_items = {'id': part_id,
+                            'title': toc_entry.get('title'),
+                            'path': toc_entry.get('path'),
+                            'li_items': []}
+                root_ol_items['li_items'].append(ol_items)
+                current_ol_items = ol_items
+        else:
+            raise ValueError('toc_entry with no kind')
+
+    html = '<nav epub:type="toc">\n'
+    html += f'<h1>{TOC_CHAPTER_TITLE[lang]}</h1>\n'
+    html += '<ol>\n'
+    ncx_nav = ''
+
+    for li_item in root_ol_items['li_items']:
+        if 'li' in li_item:
+            # we're inside a leaf, a chapter, a list item
+            html += li_item['li']
+            ncx_nav += li_item['ncx_nav']
+        else:
+            # we're opening a part
+            li_items = li_item
+            li = _build_nav_li(li_item, no_id=True)
+            html += f'<li>{li}\n<ol>\n'
+            for li_item in li_items['li_items']:
+                if 'li' in li_item:
+                    # we're inside a leaf, a chapter, a list item
+                    html += li_item['li']
+                else:
+                    # You should implement this part with a recursive function
+                    raise NotImplementedError('FIXME: more levels not implemented')
+            html += '</ol></li>\n'
+
+    html += '</ol>'
+    html += '</nav>\n'
+    html_nav = html
+
+    html = CHAPTER_SECTION_LINE.format(chapter_id=chapter_id,
+                                       epub_type='toc')
+    html += html_nav
+    html += '</section>\n'
+    html += '\n</body>\n</html>\n'
+    #print(ncx_nav)
+    return {'html': html,
+            'ncx_nav': ncx_nav,
+            'html_nav': html_nav}
 
 
 def _compile_chapter(chapter,
@@ -842,6 +985,54 @@ def _compile_part(chapter,
     return {'html': result['rendered_text']}
 
 
+def update_zipfile(zip_path, fpath_to_update, data):
+    # generate a temp file
+    tmpfd, tmpname = tempfile.mkstemp(dir=os.path.dirname(zip_path))
+    os.close(tmpfd)
+
+    # create a temp copy of the archive without filename
+    with zipfile.ZipFile(zip_path, 'r') as zin:
+        with zipfile.ZipFile(tmpname, 'w') as zout:
+            zout.comment = zin.comment # preserve the comment
+            for item in zin.infolist():
+                if item.filename != fpath_to_update:
+                    zout.writestr(item, zin.read(item.filename))
+
+    # replace with the temp archive
+    os.remove(zip_path)
+    os.rename(tmpname, zip_path)
+
+    # now add filename with its new data
+    with zipfile.ZipFile(zip_path, mode='a', compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(fpath_to_update, data)
+
+
+def _fix_ncx(epub_path, new_ncx_nav):
+    epub_zip = zipfile.ZipFile(epub_path, 'r')
+    fpath_to_fix = 'EPUB/toc.ncx'
+    orig_ncx = epub_zip.open(fpath_to_fix, 'r').read().decode()
+    orig_ncx = orig_ncx.replace('\n', '')
+
+    ncx_no_nav = re.sub('<navMap>.*</navMap>', '', orig_ncx)
+    fixed_ncx = ncx_no_nav.replace('</ncx>',
+                                   f'\n<navMap>\n{new_ncx_nav}</navMap>\n</ncx>')
+    update_zipfile(epub_path, fpath_to_fix, fixed_ncx)
+
+
+def _fix_nav(epub_path, new_nav):
+    epub_zip = zipfile.ZipFile(epub_path, 'r')
+    fpath_to_fix = 'EPUB/nav.xhtml'
+    orig_ncx = epub_zip.open(fpath_to_fix, 'r').read().decode()
+    print(orig_ncx)
+    orig_ncx = orig_ncx.replace('\n', '')
+
+    ncx_no_nav = re.sub('<nav .*</nav>', '', orig_ncx)
+    fixed_ncx = ncx_no_nav.replace('</body>',
+                                   f'{new_nav}\n</body>\n')
+    print(fixed_ncx)
+    update_zipfile(epub_path, fpath_to_fix, fixed_ncx)
+
+
 def create_epub(book_base_dir, out_path, bibliography_path, metadata):
     book = epub.EpubBook()
 
@@ -862,7 +1053,7 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
     bibliography_entries_seen = set()
     toc_info = []
     parts_are_used = False
-
+    #pprint(sections['parts_and_chapters'])
     spine = []
     toc = []
     for section in sections['parts_and_chapters']:
@@ -888,7 +1079,8 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
             toc_entry = {'id': section['id'],
                          'path': section['path'],
                          'title': section['title'],
-                         'level': 1}
+                         'level': 1,
+                         'kind': section['kind']}
             toc_info.append(toc_entry)
 
         elif section['kind'] == 'part':
@@ -909,7 +1101,8 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
             toc_entry = {'id': section['id'],
                          'path': section['path'],
                          'title': section['title'],
-                         'level': 1}
+                         'level': 1,
+                         'kind': section['kind']}
             toc_info.append(toc_entry)
 
             part_toc_chapters = []
@@ -934,17 +1127,19 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
                 toc_entry = {'id': chapter['id'],
                              'path': chapter['path'],
                              'title': chapter['title'],
-                             'level': 2}
+                             'level': 2,
+                             'kind': 'chapter'}
                 toc_info.append(toc_entry)
                 part_toc_chapters.append(epub_chapter)
             part_toc = toc.append([epub.Section(section['title']), part_toc_chapters])
-
+    #pprint(toc_info)
     if (footnote_definitions or bibliography_entries_seen) and parts_are_used:
         part_id = 'part_back_matter'
         part_title = APPENDICES_PART_TITLE[lang]
         toc_entry = {'id': part_id,
                      'title': part_title,
-                     'level': 1}
+                     'level': 1,
+                     'kind': 'part'}
         toc_info.append(toc_entry)
 
     toc_level_for_appendix_chapters = 2 if parts_are_used else 1
@@ -971,7 +1166,8 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
                      'path': chapter_path,
                      'fname': endnote_chapter_fname,
                      'title': ENDNOTE_CHAPTER_TITLE[lang],
-                     'level': toc_level_for_appendix_chapters}
+                     'level': toc_level_for_appendix_chapters,
+                     'kind': 'chapter'}
         toc_info.append(toc_entry)
 
     if bibliography_entries_seen:
@@ -996,7 +1192,8 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
                      'path': chapter_path,
                      'fname': bibliography_chapter_fpath,
                      'title': BIBLIOGRAPHY_CHAPTER_TITLE[lang],
-                     'level': toc_level_for_appendix_chapters}
+                     'level': toc_level_for_appendix_chapters,
+                     'kind': 'chapter'}
         toc_info.append(toc_entry)
 
     if toc_info:
@@ -1008,6 +1205,7 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
                          header_level=1,
                          toc_info=toc_info,
                          lang=lang)
+        toc_result = result
         epub_chapter = epub.EpubHtml(title=chapter_title,
                                      file_name=chapter_path.name,
                                      lang=lang)
@@ -1021,6 +1219,9 @@ def create_epub(book_base_dir, out_path, bibliography_path, metadata):
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
     epub.write_epub(str(out_path), book)
+
+    _fix_ncx(out_path, toc_result['ncx_nav'])
+    _fix_nav(out_path, toc_result['html_nav'])
 
 
 def unzip_epub(ebook_path, out_dir):
@@ -1062,3 +1263,5 @@ if __name__ == '__main__':
 
 # TODO:
 # - index
+# - enlaces back desde las notas
+# - completar navitem
