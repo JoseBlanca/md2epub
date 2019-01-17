@@ -3,8 +3,11 @@ import re
 import weakref
 from collections import Counter
 import warnings
+from pathlib import Path
 
 import yaml
+
+from citations import load_bibliography_db
 
 SYMBOLS_FOR_IDS = '(?:#|\$)'
 _HEADER_RE = re.compile('^(?P<pounds>#+)(?P<text>[^{]+) *{?(?P<item1>' + SYMBOLS_FOR_IDS + '[^ }]+)? ?(?P<item2>' + SYMBOLS_FOR_IDS + '[^}]+)?}?$')
@@ -13,6 +16,7 @@ BOOK = 'book'
 CHAPTER = 'chapter'
 PART = 'part'
 SUBCHAPTER = 'subchapter'
+TOC = 'toc'
 SECTION_KINDS = [BOOK, PART, CHAPTER, SUBCHAPTER]
 
 
@@ -97,7 +101,58 @@ def _open_and_concat_text_paths(paths):
                 yield line
 
 
-class BookSection:
+class _BookSection:
+    def _get_subsections_recursively(self, section, subsections,
+                                     stop_in_me=True):
+        subsections.append(section)
+
+        if stop_in_me and section is self:
+            return True
+
+        section_subsections = section.subsections
+        if not section_subsections:
+            return False
+        else:
+            for section in section_subsections:
+                stop = self._get_subsections_recursively(section, subsections,
+                                                         stop_in_me=stop_in_me)
+                if stop:
+                    return stop
+        return False
+
+    def _walk_book_sections(self, stop_in_me=True):
+        book = self.book
+        subsections = []
+        self._get_subsections_recursively(book, subsections, stop_in_me)
+        return subsections
+
+    @property
+    def idx(self):
+        if self.kind == BOOK:
+            return 0
+
+        parent = self.parent
+        subsection_counts = Counter()
+        for subsection in self._walk_book_sections(stop_in_me=True):
+            subsection_counts[subsection.kind] += 1
+
+        return subsection_counts[self.kind]
+
+    @property
+    def book(self):
+        current_section = self
+        while True:
+            parent = current_section.parent
+            if parent is None:
+                return current_section
+            current_section = parent
+
+    @property
+    def subsections(self):
+        return self._subsections
+
+
+class BookSection(_BookSection):
     def __init__(self, dir_, parent=None):
         self.dir = dir_
         self.parent = parent
@@ -156,51 +211,6 @@ class BookSection:
 
     def _set_kind(self):
         self._set_idx_kind_title(set_only_kind=True)
-
-    @property
-    def book(self):
-        current_section = self
-        while True:
-            parent = current_section.parent
-            if parent is None:
-                return current_section
-            current_section = parent
-
-    def _get_subsections_recursively(self, section, subsections,
-                                     stop_in_me=True):
-        subsections.append(section)
-
-        if stop_in_me and section is self:
-            return True
-
-        section_subsections = section.subsections
-        if not section_subsections:
-            return False
-        else:
-            for section in section_subsections:
-                stop = self._get_subsections_recursively(section, subsections,
-                                                         stop_in_me=stop_in_me)
-                if stop:
-                    return stop
-        return False
-
-    def _walk_book_sections(self, stop_in_me=True):
-        book = self.book
-        subsections = []
-        self._get_subsections_recursively(book, subsections, stop_in_me)
-        return subsections
-
-    @property
-    def idx(self):
-        if self.kind == BOOK:
-            return 0
-
-        parent = self.parent
-        subsection_counts = Counter()
-        for subsection in self._walk_book_sections(stop_in_me=True):
-            subsection_counts[subsection.kind] += 1
-
-        return subsection_counts[self.kind]
 
     def _set_id(self, suggested_id):
         if suggested_id:
@@ -292,10 +302,6 @@ class BookSection:
         for subdir in subdirs:
             subsections.append(BookSection(subdir, parent=self))
         self._subsections = subsections
-
-    @property
-    def subsections(self):
-        return self._subsections
 
     def _get_parents_up_to_book(self):
         parents = []
@@ -389,3 +395,69 @@ class BookSection:
                         last_line_was_blank = False
 
                     yield line
+
+    @property
+    def metadata(self):
+        return self.book._metadata
+
+    @property
+    def lang(self):
+        return self.metadata['lang']
+
+    @property
+    def bibliography_db(self):
+        if self.kind == BOOK:
+            try:
+                return self._bibliography_db
+            except AttributeError:
+                try:
+                    bibliography_path = Path(self.metadata['bibliography'])
+                except KeyError:
+                    bibliography_path = None
+                if bibliography_path is None:
+                    self._bibliography_db = None
+                else:
+                    self._bibliography_db = load_bibliography_db(bibliography_path)
+                return self._bibliography_db
+        else:
+            return self.book.bibliography_db
+
+    def _get_section_index(self):
+        try:
+            return self._section_index
+        except AttributeError:
+            pass
+
+        index = {}
+        for section in self._walk_book_sections(stop_in_me=False):
+            id_ = section.id
+            if id_ in index:
+                raise ValueError(f'Repeated section id: {id_}')
+            index[id_] = section
+        self._section_index = index
+        return self._section_index
+
+    def get_section_by_id(self, section_id):
+        if self.kind == BOOK:
+            index = self._get_section_index()
+            return index[section_id]
+        else:
+            return self.book.get_section_by_id(section_id)
+
+    def has_parts(self):
+        if self.kind == BOOK:
+            return any(section.kind == PART for section in self.subsections)
+        else:
+            return self.book.has_parts(section_id)
+
+    @property
+    def has_no_html(self):
+        return not self.md_files
+
+class BookSectionWithNoFiles(_BookSection):
+    def __init__(self, parent, id_, title, kind):
+        self.parent = parent
+        self.id = id_
+        self.title = title
+        self.kind = kind
+        self._subsections = []
