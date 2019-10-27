@@ -59,7 +59,7 @@ def _parse_pandoc_citations(pandoc_html):
     for div in references_div.find_all('div'):
         citation_key = div['id'][4:]
         html_text = str(div.p)
-        references[citation_key] = {'html_text'}
+        references[citation_key] = html_text
 
     citations = sorted(in_text_citations_by_footnote.values(), key=lambda x: x['idx'])
     return {'citations': citations, 'references': references}
@@ -83,5 +83,3 @@ if __name__ == '__main__':
                                 csl='chicago-note-bibliography-with-ibid',
                                 libray_csl_json_path=libray_csl_json_path)
     pprint(result)
-    # dar la lista de citations en markdown y devolver las citations y references.
-    # lo ideal sería poner un id único en cada citation en markdown que se pudiese recuperar. Tal vez usando el texto extra que se puede añadir al markdown citation del pandoc

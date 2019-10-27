@@ -7,8 +7,6 @@ from pathlib import Path
 
 import yaml
 
-from citations import load_bibliography_db
-
 SYMBOLS_FOR_IDS = '(?:#|\$)'
 _HEADER_RE = re.compile('^(?P<pounds>#+)(?P<text>[^{]+) *{?(?P<item1>' + SYMBOLS_FOR_IDS + '[^ }]+)? ?(?P<item2>' + SYMBOLS_FOR_IDS + '[^}]+)?}?$')
 
@@ -405,22 +403,19 @@ class BookSection(_BookSection):
         return self.metadata['lang']
 
     @property
-    def bibliography_db(self):
+    def bibliography_path(self):
         if self.kind == BOOK:
             try:
-                return self._bibliography_db
+                return self._bibliography_path
             except AttributeError:
                 try:
                     bibliography_path = Path(self.metadata['bibliography'])
                 except KeyError:
                     bibliography_path = None
-                if bibliography_path is None:
-                    self._bibliography_db = None
-                else:
-                    self._bibliography_db = load_bibliography_db(bibliography_path)
-                return self._bibliography_db
+                self._bibliography_path = bibliography_path
+                return self._bibliography_path
         else:
-            return self.book.bibliography_db
+            return self.book.bibliography_path
 
     def _get_section_index(self):
         try:

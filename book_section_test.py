@@ -155,7 +155,7 @@ class GetSectionsTest(unittest.TestCase):
             assert ''.join(book.md_text) == '\n'
             assert book.is_within_a_part() is None
             assert book.lang == 'es'
-            assert book.bibliography_db is not None
+            assert book.bibliography_path is not None
             assert book.get_section_by_id('capitulo1').title == 'This is one chapter'
             assert not book.has_parts()
 
