@@ -19,6 +19,7 @@ from book_section import (CHAPTER, PART, SUBCHAPTER, TOC,
 from references import process_citations
 
 EPUBCHECK_JAR = 'epubcheck-4.0.2/epubcheck.jar'
+EPUBCHECK_JAR = 'epubcheck-4.2.2/epubcheck.jar'
 
 CONTAINER_XML = '''<?xml version='1.0' encoding='utf-8'?>
 <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
@@ -485,10 +486,12 @@ def _create_part(part, epub_zip, bibliography_entries_seen,
 
 
 def _create_endnotes_section_html(endnote_definitions):
-    html = '<ol role="doc-endnotes">'
+
+    html = '<section role="doc-endnotes">\n<ol>\n'
     for endnote_definition in endnote_definitions:
         html += endnote_definition['footnote_definition_li']
-    html += '</ol>\n'
+        html += '\n'
+    html += '</ol>\n</section>\n'
     return html
 
 
@@ -509,10 +512,10 @@ def _create_bibliography_section_html(bibliography_entries, book):
     htmls = list(bibliography_entries.values())
     htmls.sort()
 
-    html = '<ul role="Bibliography">'
+    html = '<section role="doc-bibliography">\n<ul>\n'
     for html_li in htmls:
-        html += f'<li>{html_li}</li>'
-    html += '</ul>\n'
+        html += f'<li>{html_li}</li>\n'
+    html += '</ul>\n</section>\n'
     return html
 
 

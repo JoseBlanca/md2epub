@@ -8,7 +8,7 @@ import shutil
 
 from book_section import (BookSection, _parse_header_line, BOOK, CHAPTER, PART,
                           SUBCHAPTER)
-from epub_creation import create_epub, unzip_epub
+from epub_creation import create_epub, unzip_epub, check_epub
 
 
 class ParseHeadersTest(unittest.TestCase):
@@ -250,7 +250,7 @@ class CreateEpubTest(unittest.TestCase):
             create_epub(book, epub_path)
             shutil.copyfile(epub_path, 'rendered_book2.epub')
             unzip_epub(epub_path, out_dir)
-
+            check_epub(epub_path)
 
         out_dir = Path('rendered_book3')
         with _prepare_book_md_files(BOOK2_STRUCTURE) as book_dir:
@@ -261,8 +261,8 @@ class CreateEpubTest(unittest.TestCase):
             epub_path = Path(epub_fhand.name)
             create_epub(book, epub_path)
             shutil.copyfile(epub_path, 'rendered_book3.epub')
-
             unzip_epub(epub_path, out_dir)
+            check_epub(epub_path)
 
 
 if __name__ == '__main__':
