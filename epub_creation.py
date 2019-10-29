@@ -163,12 +163,15 @@ def _footnote_definition_processor(footnote_definition,
 class _CitationProcessor:
     def __init__(self, bibliography_chapter_fpath,
                  endnote_chapter_fpath,
-                 bibliography_entries_seen, book):
+                 bibliography_entries_seen,
+                 references_not_found,
+                 book):
         self.bibliography_chapter_fpath = bibliography_chapter_fpath
         self.endnote_chapter_fpath = endnote_chapter_fpath
         self.book = book
         self.bibliography_path = book.bibliography_path
         self.bibliography_entries_seen = bibliography_entries_seen
+        self.references_not_found = references_not_found
         self.last_citation_id_processed_for_section = {}
         self.last_citation_texts = []
         self._citation_counts = Counter()
@@ -201,20 +204,29 @@ class _CitationProcessor:
         citation_texts_to_process.append(citation['text'])
         results = process_citations(citation_texts_to_process,
                                     libray_csl_json_path=bibliography_path)
-        citation_result = results['citations'][-1]
+        if results['references_not_found']:
+            self.references_not_found.update(results['references_not_found'])
+            citation_result = None
+        else:
+            citation_result = results['citations'][-1]
+
         if self.last_citation_id_processed_for_section.get(fpath_for_section_in_epub):
             self.last_citation_texts = citation_texts_to_process
         else:
             self.last_citation_texts = []
 
-        html = _create_html_for_numbered_footnote(_NUM_FOOTNOTES_AND_CITATIONS_SEEN[book_id])
-        text = f'<a id="{a_id}" href="{href_to_footnote_definition}" role="doc-noteref" epub:type="noteref">{html}</a>'
+        if citation_result:
+            html = _create_html_for_numbered_footnote(_NUM_FOOTNOTES_AND_CITATIONS_SEEN[book_id])
+            text = f'<a id="{a_id}" href="{href_to_footnote_definition}" role="doc-noteref" epub:type="noteref">{html}</a>'
 
-        li_id = f'ftd_{footnote_id}'
-        back_href_to_footnote = f'{fpath_for_section_in_epub}#ft_{footnote_id}'
-        footnote_definition_text = f'<li id= "{li_id}" role="doc-endnote">{citation_result["footnote_html_text"]}</li>'
+            li_id = f'ftd_{footnote_id}'
+            back_href_to_footnote = f'{fpath_for_section_in_epub}#ft_{footnote_id}'
+            footnote_definition_text = f'<li id= "{li_id}" role="doc-endnote">{citation_result["footnote_html_text"]}</li>'
 
-        self.bibliography_entries_seen.update(results['references'])
+            self.bibliography_entries_seen.update(results['references'])
+        else:
+            text = citation['text']
+            footnote_definition_text = None
 
         return {'footnote_definition_li': footnote_definition_text,
                 'processed_text': text,
@@ -289,6 +301,7 @@ def _split_md_text_in_items(md_text):
 def _process_citations_and_footnotes(md_text,
                                      section,
                                      bibliography_entries_seen,
+                                     references_not_found,
                                      endnote_definitions):
     items = _split_md_text_in_items(md_text)
 
@@ -299,6 +312,7 @@ def _process_citations_and_footnotes(md_text,
     citation_processor = _CitationProcessor(bibliography_chapter_fpath=_get_epub_fpath_for_bibliography_chapter(),
                                             endnote_chapter_fpath=_get_epub_fpath_for_endnote_chapter(),
                                             bibliography_entries_seen=bibliography_entries_seen,
+                                            references_not_found=references_not_found,
                                             book=section.book)
     item_processors = {'footnote': partial(_footnote_processor,
                                            endnote_chapter_fpath=_get_epub_fpath_for_endnote_chapter(),
@@ -362,12 +376,14 @@ def _process_basic_markdown(md_text):
 
 
 def _process_md_text(md_text, section, bibliography_entries_seen,
+                     references_not_found,
                      endnote_definitions):
     md_text = '\n'.join(md_text)
 
     result = _process_citations_and_footnotes(md_text=md_text,
                                               section=section,
                                               bibliography_entries_seen=bibliography_entries_seen,
+                                              references_not_found=references_not_found,
                                               endnote_definitions=endnote_definitions)
     result['rendered_lines'] = _process_basic_markdown(result['rendered_text'])
     return result
@@ -390,7 +406,8 @@ def _split_section_in_fragments(lines):
                'lines': fragment_lines}
 
 
-def _create_html_for_md_text_in_section(section, bibliography_entries_seen):
+def _create_html_for_md_text_in_section(section, bibliography_entries_seen,
+                                        references_not_found):
     md_text = section.md_text
 
     rendered_lines = []
@@ -405,6 +422,7 @@ def _create_html_for_md_text_in_section(section, bibliography_entries_seen):
         elif fragment['kind'] == 'fragment':
             result = _process_md_text(fragment['lines'], section=section,
                                       bibliography_entries_seen=bibliography_entries_seen,
+                                      references_not_found=references_not_found,
                                       endnote_definitions=footnote_definitions)
             rendered_lines.append(result['rendered_lines'])
     result = {'rendered_lines': rendered_lines,
@@ -418,11 +436,13 @@ def _write_html_in_zip_file(epub_zip, fpath, html):
     epub_zip.writestr(fpath, html)
 
 
-def _create_chapter(chapter, epub_zip, bibliography_entries_seen):
+def _create_chapter(chapter, epub_zip, bibliography_entries_seen,
+                    references_not_found):
 
     footnote_definitions = []
     res = _create_html_for_md_text_in_section(chapter,
-                                              bibliography_entries_seen)
+                                              bibliography_entries_seen=bibliography_entries_seen,
+                                              references_not_found=references_not_found)
     html = '\n'.join(res['rendered_lines'])
     footnote_definitions.extend(res['footnote_definitions'])
 
@@ -430,7 +450,8 @@ def _create_chapter(chapter, epub_zip, bibliography_entries_seen):
         html += CHAPTER_SECTION_LINE.format(epub_type='subchapter',
                                             section_id=subchapter.id)
         res = _create_html_for_md_text_in_section(subchapter,
-                                                  bibliography_entries_seen)
+                                                  bibliography_entries_seen=bibliography_entries_seen,
+                                                  references_not_found=references_not_found)
         footnote_definitions.extend(res['footnote_definitions'])
         html += '\n'.join(res['rendered_lines'])
         html += '</section>\n'
@@ -458,13 +479,15 @@ def _create_section_xhtml_file(title, id_, section_html, fpath, epub_type,
 
 
 def _create_part(part, epub_zip, bibliography_entries_seen,
+                 references_not_found,
                  endnote_definitions):
     title = part.title
     part_id = part.id
     fpath = _create_epub_fpath_for_section(part)
 
     result = _create_html_for_md_text_in_section(part,
-                                                 bibliography_entries_seen)
+                                                 bibliography_entries_seen=bibliography_entries_seen,
+                                                 references_not_found=references_not_found)
     section_html = '\n'.join(result['rendered_lines'])
     endnote_definitions.extend(result['footnote_definitions'])
 
@@ -478,7 +501,9 @@ def _create_part(part, epub_zip, bibliography_entries_seen,
     footnote_definitions = []
     for chapter in part.subsections:
         if chapter.kind == CHAPTER:
-            res = _create_chapter(chapter, epub_zip, bibliography_entries_seen)
+            res = _create_chapter(chapter, epub_zip,
+                                  bibliography_entries_seen=bibliography_entries_seen,
+                                  references_not_found=references_not_found)
         else:
             raise RuntimeError('A part should only have chapters as subparts.')
         footnote_definitions.extend(res['footnote_definitions'])
@@ -489,8 +514,9 @@ def _create_endnotes_section_html(endnote_definitions):
 
     html = '<section role="doc-endnotes">\n<ol>\n'
     for endnote_definition in endnote_definitions:
-        html += endnote_definition['footnote_definition_li']
-        html += '\n'
+        if endnote_definition['footnote_definition_li']:
+            html += endnote_definition['footnote_definition_li']
+            html += '\n'
     html += '</ol>\n</section>\n'
     return html
 
@@ -750,6 +776,8 @@ def _create_opf(book, epub_zip):
 
 
 def create_epub(book, epub_path):
+    references_not_found = set()
+
     with zipfile.ZipFile(epub_path, 'w') as epub_zip:
         _create_mimetype_file(epub_zip)
         _create_epub_backbone(epub_zip)
@@ -759,12 +787,14 @@ def create_epub(book, epub_path):
         for section in book.subsections:
             if section.kind == CHAPTER:
                 res = _create_chapter(section, epub_zip,
-                                      bibliography_entries_seen)
+                                      bibliography_entries_seen=bibliography_entries_seen,
+                                      references_not_found=references_not_found)
                 endnote_definitions.extend(res['footnote_definitions'])
             elif section.kind == PART:
                 res = _create_part(section, epub_zip,
-                                   bibliography_entries_seen,
-                                   endnote_definitions)
+                                   bibliography_entries_seen=bibliography_entries_seen,
+                                   references_not_found=references_not_found,
+                                   endnote_definitions=endnote_definitions)
             elif section.kind == BOOK:
                 raise ValueError('A book should not include a subsection of kind BOOK')
             elif section.kind == SUBCHAPTER:
@@ -824,7 +854,11 @@ def create_epub(book, epub_path):
         _create_opf(book, epub_zip=epub_zip)
 
     check_epub(epub_path)
-
+    if references_not_found:
+        msg = 'Some references were not found in the bibliography database'
+        print('References not found:')
+        print(','.join(references_not_found))
+        raise RuntimeError(msg)
 
 def unzip_epub(ebook_path, out_dir):
 

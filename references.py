@@ -26,7 +26,7 @@ def _run_pandoc(mk_text, csl_path, libray_csl_json_path):
                '--bibliography', str(libray_csl_json_path),
                '--filter', 'pandoc-citeproc',
                fhand.name]
-        process = run(cmd, stdout=PIPE, check=True)
+        process = run(cmd, stdout=PIPE, stderr=PIPE, check=True)
     return process
 
 
@@ -70,7 +70,18 @@ def process_citations(mk_citations, libray_csl_json_path,
     csl_path = CSL_PATHS[csl]
     mk_text = '\n'.join(mk_citations)
     process = _run_pandoc(mk_text, csl_path, libray_csl_json_path)
-    return _parse_pandoc_citations(process.stdout.decode())
+
+    result = _parse_pandoc_citations(process.stdout.decode())
+
+    stderr = process.stderr.decode()
+    references_not_found = []
+    if 'pandoc-citeproc: reference' in stderr and 'not found' in stderr:
+        for line in stderr.splitlines():
+            reference = line[26:][:-10].strip()
+            if reference not in references_not_found:
+                references_not_found.append(reference)
+    result['references_not_found'] = references_not_found
+    return result
 
 
 if __name__ == '__main__':
@@ -79,7 +90,9 @@ if __name__ == '__main__':
 
     result = process_citations(['[see @noGapsClassic, pp. 33-35]',
                                 '[@noGapsClassic, pp. 100]',
-                                '[@noGapsClassic]'],
+                                '[@noGapsClassic]',
+                                '[@noref1]',
+                                '[@noref2]'],
                                 csl='chicago-note-bibliography-with-ibid',
                                 libray_csl_json_path=libray_csl_json_path)
     pprint(result)
