@@ -5,6 +5,7 @@ from subprocess import run, PIPE
 import re
 from pprint import pprint
 from collections import OrderedDict
+import os
 
 from bs4 import BeautifulSoup
 
@@ -13,6 +14,8 @@ from bs4 import BeautifulSoup
 PANDOC_BIN = 'pandoc'
 
 CSL_PATHS = {'chicago-note-bibliography-with-ibid': Path('chicago-note-bibliography-with-ibid.csl')}
+this_module_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+CSL_PATHS = {csl: this_module_dir / fname for  csl, fname in CSL_PATHS.items()}
 
 
 def _run_pandoc(mk_text, csl_path, libray_csl_json_path):
@@ -56,10 +59,11 @@ def _parse_pandoc_citations(pandoc_html):
 
     references = OrderedDict()
     references_div = soup.find('div', "references")
-    for div in references_div.find_all('div'):
-        citation_key = div['id'][4:]
-        html_text = str(div.p)
-        references[citation_key] = html_text
+    if references_div:
+        for div in references_div.find_all('div'):
+            citation_key = div['id'][4:]
+            html_text = str(div.p)
+            references[citation_key] = html_text
 
     citations = sorted(in_text_citations_by_footnote.values(), key=lambda x: x['idx'])
     return {'citations': citations, 'references': references}

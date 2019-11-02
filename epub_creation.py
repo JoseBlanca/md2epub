@@ -9,6 +9,7 @@ from pprint import pprint
 import datetime
 import subprocess
 import sys
+from pathlib import Path
 
 import mistune
 
@@ -18,8 +19,12 @@ from book_section import (CHAPTER, PART, SUBCHAPTER, TOC,
 #from citations import create_citation_note, create_bibliography_citation
 from references import process_citations
 
+this_module_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+
 EPUBCHECK_JAR = 'epubcheck-4.0.2/epubcheck.jar'
 EPUBCHECK_JAR = 'epubcheck-4.2.2/epubcheck.jar'
+
+EPUBCHECK_JAR = this_module_dir / EPUBCHECK_JAR
 
 CONTAINER_XML = '''<?xml version='1.0' encoding='utf-8'?>
 <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
@@ -165,6 +170,7 @@ class _CitationProcessor:
                  endnote_chapter_fpath,
                  bibliography_entries_seen,
                  references_not_found,
+                 citation_counts,
                  book):
         self.bibliography_chapter_fpath = bibliography_chapter_fpath
         self.endnote_chapter_fpath = endnote_chapter_fpath
@@ -174,9 +180,12 @@ class _CitationProcessor:
         self.references_not_found = references_not_found
         self.last_citation_id_processed_for_section = {}
         self.last_citation_texts = []
-        self._citation_counts = Counter()
+        self._citation_counts = citation_counts
 
     def __call__(self, citation, fpath_for_section_in_epub):
+
+        debug_notes = ['Mimir2019', 'whatisreal']
+        debug_notes = []
 
         bibliography_path = self.bibliography_path
         if bibliography_path is None:
@@ -190,6 +199,9 @@ class _CitationProcessor:
         footnote_id = f'{citation_id}_{citation_counts[citation_id]}'
         _NUM_FOOTNOTES_AND_CITATIONS_SEEN[book_id] += 1
 
+        if citation_id in debug_notes:
+            print('citation_id', citation_id)
+
         fpath = os.path.join('..', self.endnote_chapter_fpath)
         href_to_footnote_definition = f'{fpath}#ftd_{footnote_id}'
         a_id = f'ft_{footnote_id}'
@@ -201,19 +213,37 @@ class _CitationProcessor:
         if self.last_citation_id_processed_for_section.get(fpath_for_section_in_epub):
             citation_texts_to_process = self.last_citation_texts[:]
 
-        citation_texts_to_process.append(citation['text'])
+        citation_text = citation['text'].strip()
+
+        citation_texts_to_process.append(citation_text)
         results = process_citations(citation_texts_to_process,
                                     libray_csl_json_path=bibliography_path)
-        if results['references_not_found']:
+    
+        if citation_id in debug_notes and False:
+            pprint(results)
+
+        strip_citation_id = citation_id.strip().split(' ')[0].split('#')[0].strip('/:')
+        if strip_citation_id in results['references_not_found']:
             self.references_not_found.update(results['references_not_found'])
             citation_result = None
+            #citation_texts_to_process = citation_texts_to_process[:-1]
         else:
             citation_result = results['citations'][-1]
+            if False:
+                pprint(results)
+                print('citation_id', citation_id)
+                print('strip_id', strip_citation_id)
+                print('pandoc_key', citation_result['citation_key'])
+            assert citation_result['citation_key'].strip('/') == strip_citation_id
 
         if self.last_citation_id_processed_for_section.get(fpath_for_section_in_epub):
             self.last_citation_texts = citation_texts_to_process
         else:
             self.last_citation_texts = []
+
+        if citation_id in debug_notes:
+            print('citation_result')
+            pprint(citation_result)
 
         if citation_result:
             html = _create_html_for_numbered_footnote(_NUM_FOOTNOTES_AND_CITATIONS_SEEN[book_id])
@@ -228,9 +258,15 @@ class _CitationProcessor:
             text = citation['text']
             footnote_definition_text = None
 
-        return {'footnote_definition_li': footnote_definition_text,
+        res = {'footnote_definition_li': footnote_definition_text,
                 'processed_text': text,
                 'match_location': citation['match'].span()[0]}
+
+        if citation_id in debug_notes:
+            print('result')
+            pprint(res)
+
+        return res
 
 
 def _internal_link_processor(internal_link, book):
@@ -258,7 +294,7 @@ def _split_md_text_in_items(md_text):
 
     footnote_re = re.compile(r' *\[\^(?P<id>[^\]]+)\]')
     footnote_definition_re = re.compile(r'\[\^(?P<id>[^\]]*)\]:(?P<content>[^\n]+)')
-    citation_re = re.compile(r' *\[@(?P<id>[^\],]+),? *(?P<locator_term>[\w]*) *(?P<locator_positions>[0-9]*)\]', re.UNICODE)
+    citation_re = re.compile(r' *\[@(?P<id>[^ \],]+),? *(?P<locator_term>[\w]*):? *(?P<locator_positions>[0-9]*)\]', re.UNICODE)
     internal_link_re = re.compile(r'\[(?P<text>[^\]]+)\]\(#(?P<link_id>[^\)]+)\)')
 
     item_kinds = OrderedDict([('footnote_definition', {'re': footnote_definition_re}),
@@ -267,6 +303,13 @@ def _split_md_text_in_items(md_text):
                               ('internal_link', {'re': internal_link_re}),
                               ])
     re_idx = {item_kind: idx for idx, item_kind in enumerate(item_kinds.keys())}
+
+    debug_text = '@whatisreal'
+    debug_text = None
+
+    if debug_text and debug_text in md_text:
+        print('md_text')
+        pprint(md_text)
 
     start_pos_to_search = 0
     while True:
@@ -281,17 +324,28 @@ def _split_md_text_in_items(md_text):
             matches.sort(key=lambda match: match['match'].start())
             next_match = matches[0]['match']
             kind = matches[0]['kind']
+            if debug_text:
+                print('matches')
+                pprint(matches)
         else:
             yield {'kind': 'std_md',
                    'text': md_text[start_pos_to_search:]}
             break
 
         if start_pos_to_search < next_match.start():
-            yield {'kind': 'std_md',
+            res = {'kind': 'std_md',
                    'text': md_text[start_pos_to_search:next_match.start()]}
-        yield {'kind': kind,
+            if debug_text and debug_text in res['text']:
+                print('start_pos_to_search < next_match.start()', start_pos_to_search, next_match.start())
+                print('yield result')
+                pprint(res)
+            yield res
+        res = {'kind': kind,
                'text': md_text[next_match.start():next_match.end()],
                'match': next_match}
+        if debug_text and debug_text in res['text']:
+            print('yielding in last yield')
+        yield res
         start_pos_to_search = next_match.end()
 
         if start_pos_to_search >= len(md_text):
@@ -313,6 +367,7 @@ def _process_citations_and_footnotes(md_text,
                                             endnote_chapter_fpath=_get_epub_fpath_for_endnote_chapter(),
                                             bibliography_entries_seen=bibliography_entries_seen,
                                             references_not_found=references_not_found,
+                                            citation_counts=_FOOTNOTE_DEFINITION_ID_COUNTS[id(section.book)],
                                             book=section.book)
     item_processors = {'footnote': partial(_footnote_processor,
                                            endnote_chapter_fpath=_get_epub_fpath_for_endnote_chapter(),
@@ -322,17 +377,24 @@ def _process_citations_and_footnotes(md_text,
                                                       book=section.book),
                        'citation': partial(citation_processor,
                                            fpath_for_section_in_epub=fpath_for_section_in_epub),
-                        'internal_link': partial(_internal_link_processor,
-                                                 book=section.book)
+                       'internal_link': partial(_internal_link_processor,
+                                                book=section.book)
                       }
-    processed_text = []
+
     debug_item = 'citation'
+    debug_text_in_citation = 'what'
     debug_item = None
+    
+    processed_text = []
     footnote_locations = {}
     for item in items:
         processor = item_processors.get(item['kind'], None)
         if debug_item and item['kind'] == debug_item:
-            pprint(item)
+            if debug_text_in_citation:
+                if debug_text_in_citation in item['text']:
+                    pprint(item)
+            else:
+                pprint(item)
         if processor:
             processed_item = processor(item)
             if 'processed_text' in processed_item:
@@ -343,9 +405,14 @@ def _process_citations_and_footnotes(md_text,
             processed_item = None
             text = item['text']
         if debug_item and item['kind'] == debug_item:
-            print('text', text)
+            if debug_text_in_citation:
+                if debug_text_in_citation in item['text']:
+                    print('text', text)
+            else:
+                print('text', text)
 
-        if processed_item and 'footnote_definition_li' in processed_item:
+        if (processed_item and 'footnote_definition_li' in processed_item and
+            processed_item['footnote_definition_li']):
             definition = {'footnote_definition_li': processed_item['footnote_definition_li']}
             if 'match_location' in processed_item:
                 definition['match_location'] = processed_item['match_location']
@@ -504,9 +571,9 @@ def _create_part(part, epub_zip, bibliography_entries_seen,
             res = _create_chapter(chapter, epub_zip,
                                   bibliography_entries_seen=bibliography_entries_seen,
                                   references_not_found=references_not_found)
+            footnote_definitions.extend(res['footnote_definitions'])
         else:
             raise RuntimeError('A part should only have chapters as subparts.')
-        footnote_definitions.extend(res['footnote_definitions'])
     endnote_definitions.extend(footnote_definitions)
 
 
@@ -791,10 +858,10 @@ def create_epub(book, epub_path):
                                       references_not_found=references_not_found)
                 endnote_definitions.extend(res['footnote_definitions'])
             elif section.kind == PART:
-                res = _create_part(section, epub_zip,
-                                   bibliography_entries_seen=bibliography_entries_seen,
-                                   references_not_found=references_not_found,
-                                   endnote_definitions=endnote_definitions)
+                _create_part(section, epub_zip,
+                             bibliography_entries_seen=bibliography_entries_seen,
+                             references_not_found=references_not_found,
+                             endnote_definitions=endnote_definitions)
             elif section.kind == BOOK:
                 raise ValueError('A book should not include a subsection of kind BOOK')
             elif section.kind == SUBCHAPTER:
@@ -870,7 +937,7 @@ def unzip_epub(ebook_path, out_dir):
 
 
 def check_epub(ebook_path):
-    cmd = ['java', '-jar', EPUBCHECK_JAR, str(ebook_path)]
+    cmd = ['java', '-jar', str(EPUBCHECK_JAR), str(ebook_path)]
     completed_process = subprocess.run(cmd, capture_output=True)
 
     if completed_process.returncode:
