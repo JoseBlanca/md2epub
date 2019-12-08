@@ -324,6 +324,16 @@ class BookSection(_BookSection):
             return False
 
     @property
+    def parts_and_chapters(self):
+        for section in self.subsections:
+            if section.kind == CHAPTER:
+                yield section
+            elif section.kind == PART:
+                yield section
+                for chapter in section.subsections:
+                    yield chapter
+
+    @property
     def md_text(self):
         in_metadata_yaml = False
         metadata_yaml_done = False
@@ -455,4 +465,13 @@ class BookSectionWithNoFiles(_BookSection):
         self.id = id_
         self.title = title
         self.kind = kind
+        self._subsections = []
+
+
+class SpecialSection(_BookSection):
+    def __init__(self, kind, title, id, parent):
+        self.kind = kind
+        self.title = title
+        self.id = id
+        self.parent = parent
         self._subsections = []
